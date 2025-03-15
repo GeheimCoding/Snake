@@ -2,7 +2,11 @@ use bevy::prelude::*;
 use std::time::Duration;
 
 #[derive(Resource)]
-struct Size(f32);
+struct Constants {
+    size: f32,
+    color: Color,
+    speed: Duration,
+}
 
 fn main() {
     App::new()
@@ -13,14 +17,24 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(Size(50.0))
+        .insert_resource(Constants {
+            size: 50.0,
+            color: Color::srgb(0.3, 0.5, 0.3),
+            speed: Duration::from_millis(100),
+        })
         .add_systems(Startup, setup)
         .add_systems(Update, (movement, change_direction))
         .run();
 }
 
 #[derive(Component)]
-struct Player;
+struct Head;
+
+#[derive(Component)]
+struct Body;
+
+#[derive(Component)]
+struct Tail;
 
 #[derive(Component, Default, Clone)]
 enum Direction {
@@ -41,16 +55,30 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
-    size: Res<Size>,
+    constants: Res<Constants>,
 ) {
+    let size = constants.size;
+
     commands.spawn(Camera2d);
     commands.spawn((
-        Player,
+        Head,
         Direction::default(),
         LastDirection(Direction::default()),
-        MovementTimer(Timer::new(Duration::from_millis(100), TimerMode::Repeating)),
-        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size.0)))),
-        MeshMaterial2d(color_materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        MovementTimer(Timer::new(constants.speed, TimerMode::Repeating)),
+        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size)))),
+        MeshMaterial2d(color_materials.add(constants.color)),
+    ));
+    commands.spawn((
+        Body,
+        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size)))),
+        MeshMaterial2d(color_materials.add(constants.color)),
+        Transform::from_xyz(-size, 0.0, 0.0),
+    ));
+    commands.spawn((
+        Tail,
+        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size)))),
+        MeshMaterial2d(color_materials.add(constants.color)),
+        Transform::from_xyz(-2.0 * size, 0.0, 0.0),
     ));
 }
 
@@ -62,20 +90,21 @@ fn movement(
             &mut LastDirection,
             &Direction,
         ),
-        With<Player>,
+        With<Head>,
     >,
     time: Res<Time>,
-    size: Res<Size>,
+    constants: Res<Constants>,
 ) {
+    let size = constants.size;
     let (mut movement_timer, mut transform, mut last_direction, direction) = query.single_mut();
     movement_timer.0.tick(time.delta());
 
     if movement_timer.0.just_finished() {
         let offset = match direction {
-            Direction::Up => (0.0, size.0),
-            Direction::Down => (0.0, -size.0),
-            Direction::Left => (-size.0, 0.0),
-            Direction::Right => (size.0, 0.0),
+            Direction::Up => (0.0, size),
+            Direction::Down => (0.0, -size),
+            Direction::Left => (-size, 0.0),
+            Direction::Right => (size, 0.0),
         };
         transform.translation += Vec3::new(offset.0, offset.1, 0.0);
         last_direction.0 = direction.clone();
@@ -83,7 +112,7 @@ fn movement(
 }
 
 fn change_direction(
-    mut query: Query<(&mut Direction, &LastDirection), With<Player>>,
+    mut query: Query<(&mut Direction, &LastDirection), With<Head>>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     let (mut direction, last_direction) = query.single_mut();
