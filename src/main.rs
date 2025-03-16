@@ -4,9 +4,12 @@ use std::time::Duration;
 #[derive(Resource)]
 struct Constants {
     size: f32,
-    color: Color,
-    speed: Duration,
+    mesh_handle: Handle<Mesh>,
+    color_handle: Handle<ColorMaterial>,
 }
+
+#[derive(Event)]
+struct MovementEvent;
 
 fn main() {
     App::new()
@@ -17,13 +20,16 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(Constants {
-            size: 50.0,
-            color: Color::srgb(0.3, 0.5, 0.3),
-            speed: Duration::from_millis(100),
-        })
+        .add_event::<MovementEvent>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (movement, change_direction))
+        .add_systems(
+            Update,
+            (
+                trigger_movement,
+                movement.run_if(on_event::<MovementEvent>),
+                change_direction,
+            ),
+        )
         .run();
 }
 
@@ -55,64 +61,68 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
-    constants: Res<Constants>,
 ) {
-    let size = constants.size;
+    let size = 50.0;
+    let speed = Duration::from_millis(100);
+    let color = Color::srgb(0.3, 0.5, 0.3);
+    let color_handle = color_materials.add(color);
+    let mesh_handle = meshes.add(Rectangle::from_size(Vec2::splat(size)));
+
+    let constants = Constants {
+        size,
+        mesh_handle: mesh_handle.clone(),
+        color_handle: color_handle.clone(),
+    };
+
+    commands.spawn(MovementTimer(Timer::new(speed, TimerMode::Repeating)));
+    commands.spawn((Direction::default(), LastDirection(Direction::default())));
+
+    spawn_part(&mut commands, Head, Vec2::default(), &constants);
+    spawn_part(&mut commands, Body, Vec2::new(-size, 0.0), &constants);
+    spawn_part(&mut commands, Tail, Vec2::new(-2.0 * size, 0.0), &constants);
 
     commands.spawn(Camera2d);
-    commands.spawn((
-        Head,
-        Direction::default(),
-        LastDirection(Direction::default()),
-        MovementTimer(Timer::new(constants.speed, TimerMode::Repeating)),
-        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size)))),
-        MeshMaterial2d(color_materials.add(constants.color)),
-    ));
-    commands.spawn((
-        Body,
-        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size)))),
-        MeshMaterial2d(color_materials.add(constants.color)),
-        Transform::from_xyz(-size, 0.0, 0.0),
-    ));
-    commands.spawn((
-        Tail,
-        Mesh2d(meshes.add(Rectangle::from_size(Vec2::splat(size)))),
-        MeshMaterial2d(color_materials.add(constants.color)),
-        Transform::from_xyz(-2.0 * size, 0.0, 0.0),
-    ));
+    commands.insert_resource(constants);
 }
 
-fn movement(
-    mut query: Query<
-        (
-            &mut MovementTimer,
-            &mut Transform,
-            &mut LastDirection,
-            &Direction,
-        ),
-        With<Head>,
-    >,
+fn trigger_movement(
+    mut query: Query<&mut MovementTimer>,
+    mut movement_event: EventWriter<MovementEvent>,
     time: Res<Time>,
-    constants: Res<Constants>,
 ) {
-    let size = constants.size;
-    let (mut movement_timer, mut transform, mut last_direction, direction) = query.single_mut();
-    movement_timer.0.tick(time.delta());
-
-    if movement_timer.0.just_finished() {
-        let offset = match direction {
-            Direction::Up => (0.0, size),
-            Direction::Down => (0.0, -size),
-            Direction::Left => (-size, 0.0),
-            Direction::Right => (size, 0.0),
-        };
-        transform.translation += Vec3::new(offset.0, offset.1, 0.0);
-        last_direction.0 = direction.clone();
+    if query.single_mut().0.tick(time.delta()).just_finished() {
+        movement_event.send(MovementEvent);
     }
 }
 
+fn movement(
+    mut commands: Commands,
+    mut query: Query<(&mut LastDirection, &Direction)>,
+    mut head_query: Query<(Entity, &mut Transform), With<Head>>,
+    constants: Res<Constants>,
+) {
+    let size = constants.size;
+    let (mut last_direction, direction) = query.single_mut();
+    let (head, transform) = head_query.single_mut();
+    let offset = Vec2::from(match direction {
+        Direction::Up => (0.0, size),
+        Direction::Down => (0.0, -size),
+        Direction::Left => (-size, 0.0),
+        Direction::Right => (size, 0.0),
+    });
+
+    commands.entity(head).remove::<Head>().insert(Body);
+    spawn_part(
+        &mut commands,
+        Head,
+        transform.translation.truncate() + offset,
+        &constants,
+    );
+    last_direction.0 = direction.clone();
+}
+
 fn change_direction(
-    mut query: Query<(&mut Direction, &LastDirection), With<Head>>,
+    mut query: Query<(&mut Direction, &LastDirection)>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     let (mut direction, last_direction) = query.single_mut();
@@ -144,4 +154,18 @@ fn change_direction(
             _ => direction.clone(),
         }
     }
+}
+
+fn spawn_part<Part: Component>(
+    commands: &mut Commands,
+    part: Part,
+    position: Vec2,
+    constants: &Constants,
+) {
+    commands.spawn((
+        part,
+        Mesh2d(constants.mesh_handle.clone()),
+        MeshMaterial2d(constants.color_handle.clone()),
+        Transform::from_xyz(position.x, position.y, 0.0),
+    ));
 }
