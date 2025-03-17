@@ -27,6 +27,7 @@ fn main() {
             (
                 trigger_movement,
                 movement.run_if(on_event::<MovementEvent>),
+                remove_tail.run_if(on_event::<MovementEvent>),
                 change_direction,
             ),
         )
@@ -179,6 +180,15 @@ fn change_direction(
             _ => direction.clone(),
         }
     }
+}
+
+fn remove_tail(mut commands: Commands, query: Query<(Entity, &NextPart), With<Tail>>) {
+    let (tail, next_part) = query.single();
+    commands.entity(tail).despawn();
+    commands
+        .entity(next_part.0.expect("expected tail to have a next_part"))
+        .remove::<Body>()
+        .insert(Tail);
 }
 
 fn spawn_part<Part: Component>(
