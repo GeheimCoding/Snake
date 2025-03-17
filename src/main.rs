@@ -42,6 +42,9 @@ struct Body;
 #[derive(Component)]
 struct Tail;
 
+#[derive(Component)]
+struct NextPart(Option<Entity>);
+
 #[derive(Component, Default, Clone)]
 enum Direction {
     Up,
@@ -77,9 +80,27 @@ fn setup(
     commands.spawn(MovementTimer(Timer::new(speed, TimerMode::Repeating)));
     commands.spawn((Direction::default(), LastDirection(Direction::default())));
 
-    spawn_part(&mut commands, Head, Vec2::default(), &constants);
-    spawn_part(&mut commands, Body, Vec2::new(-size, 0.0), &constants);
-    spawn_part(&mut commands, Tail, Vec2::new(-2.0 * size, 0.0), &constants);
+    let head = spawn_part(
+        &mut commands,
+        Head,
+        Vec2::default(),
+        &constants,
+        NextPart(None),
+    );
+    let body = spawn_part(
+        &mut commands,
+        Body,
+        Vec2::new(-size, 0.0),
+        &constants,
+        NextPart(Some(head)),
+    );
+    spawn_part(
+        &mut commands,
+        Tail,
+        Vec2::new(-2.0 * size, 0.0),
+        &constants,
+        NextPart(Some(body)),
+    );
 
     commands.spawn(Camera2d);
     commands.insert_resource(constants);
@@ -111,13 +132,17 @@ fn movement(
         Direction::Right => (size, 0.0),
     });
 
-    commands.entity(head).remove::<Head>().insert(Body);
-    spawn_part(
+    let new_head = spawn_part(
         &mut commands,
         Head,
         transform.translation.truncate() + offset,
         &constants,
+        NextPart(None),
     );
+    commands
+        .entity(head)
+        .remove::<Head>()
+        .insert((Body, NextPart(Some(new_head))));
     last_direction.0 = direction.clone();
 }
 
@@ -161,11 +186,15 @@ fn spawn_part<Part: Component>(
     part: Part,
     position: Vec2,
     constants: &Constants,
-) {
-    commands.spawn((
-        part,
-        Mesh2d(constants.mesh_handle.clone()),
-        MeshMaterial2d(constants.color_handle.clone()),
-        Transform::from_xyz(position.x, position.y, 0.0),
-    ));
+    next_part: NextPart,
+) -> Entity {
+    commands
+        .spawn((
+            part,
+            next_part,
+            Mesh2d(constants.mesh_handle.clone()),
+            MeshMaterial2d(constants.color_handle.clone()),
+            Transform::from_xyz(position.x, position.y, 0.0),
+        ))
+        .id()
 }
