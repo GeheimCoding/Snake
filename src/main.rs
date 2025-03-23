@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use rand::prelude::SliceRandom;
 use std::time::Duration;
 
 #[derive(Resource)]
@@ -6,6 +7,7 @@ struct Constants {
     size: f32,
     mesh_handle: Handle<Mesh>,
     color_handle: Handle<ColorMaterial>,
+    apple_texture_handle: Handle<Image>,
 }
 
 #[derive(Event)]
@@ -44,7 +46,13 @@ struct Body;
 struct Tail;
 
 #[derive(Component)]
-struct NextPart(Option<Entity>);
+struct BodyPart;
+
+#[derive(Component)]
+struct NextBodyPart(Option<Entity>);
+
+#[derive(Component)]
+struct Apple;
 
 #[derive(Component, Default, Clone)]
 enum Direction {
@@ -65,6 +73,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     let size = 50.0;
     let speed = Duration::from_millis(100);
@@ -76,31 +85,42 @@ fn setup(
         size,
         mesh_handle: mesh_handle.clone(),
         color_handle: color_handle.clone(),
+        apple_texture_handle: asset_server.load("textures/apple.png"),
     };
 
     commands.spawn(MovementTimer(Timer::new(speed, TimerMode::Repeating)));
     commands.spawn((Direction::default(), LastDirection(Direction::default())));
 
+    let head_position = Vec2::default();
     let head = spawn_part(
         &mut commands,
         Head,
-        Vec2::default(),
+        head_position,
         &constants,
-        NextPart(None),
+        NextBodyPart(None),
     );
+    let body_position = Vec2::new(-size, 0.0);
     let body = spawn_part(
         &mut commands,
         Body,
-        Vec2::new(-size, 0.0),
+        body_position,
         &constants,
-        NextPart(Some(head)),
+        NextBodyPart(Some(head)),
     );
+    let tail_position = Vec2::new(-2.0 * size, 0.0);
     spawn_part(
         &mut commands,
         Tail,
-        Vec2::new(-2.0 * size, 0.0),
+        tail_position,
         &constants,
-        NextPart(Some(body)),
+        NextBodyPart(Some(body)),
+    );
+
+    spawn_apple(
+        &mut commands,
+        size,
+        constants.apple_texture_handle.clone(),
+        vec![head_position, body_position, tail_position],
     );
 
     commands.spawn(Camera2d);
@@ -138,12 +158,12 @@ fn movement(
         Head,
         transform.translation.truncate() + offset,
         &constants,
-        NextPart(None),
+        NextBodyPart(None),
     );
     commands
         .entity(head)
         .remove::<Head>()
-        .insert((Body, NextPart(Some(new_head))));
+        .insert((Body, NextBodyPart(Some(new_head))));
     last_direction.0 = direction.clone();
 }
 
@@ -182,7 +202,7 @@ fn change_direction(
     }
 }
 
-fn remove_tail(mut commands: Commands, query: Query<(Entity, &NextPart), With<Tail>>) {
+fn remove_tail(mut commands: Commands, query: Query<(Entity, &NextBodyPart), With<Tail>>) {
     let (tail, next_part) = query.single();
     commands.entity(tail).despawn();
     commands
@@ -196,15 +216,45 @@ fn spawn_part<Part: Component>(
     part: Part,
     position: Vec2,
     constants: &Constants,
-    next_part: NextPart,
+    next_part: NextBodyPart,
 ) -> Entity {
     commands
         .spawn((
             part,
+            BodyPart,
             next_part,
             Mesh2d(constants.mesh_handle.clone()),
             MeshMaterial2d(constants.color_handle.clone()),
             Transform::from_xyz(position.x, position.y, 0.0),
         ))
         .id()
+}
+
+fn spawn_apple(
+    commands: &mut Commands,
+    size: f32,
+    apple_texture: Handle<Image>,
+    body_part_positions: Vec<Vec2>,
+) {
+    let mut spawn_points = Vec::new();
+    for x in -11..11 {
+        for y in -6..6 {
+            spawn_points.push(Vec2::new(x as f32 * size, y as f32 * size));
+        }
+    }
+    for position in body_part_positions {
+        spawn_points.retain(|p| p.x != position.x && p.y != position.y);
+    }
+
+    spawn_points.shuffle(&mut rand::rng());
+    commands.spawn((
+        Apple,
+        Sprite::from_image(apple_texture),
+        Transform::from_translation(
+            spawn_points
+                .first()
+                .expect("expected spawn point")
+                .extend(0.0),
+        ),
+    ));
 }
