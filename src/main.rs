@@ -13,6 +13,9 @@ struct Constants {
 #[derive(Event)]
 struct MovementEvent;
 
+#[derive(Event)]
+struct AppleEatenEvent(Entity);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -23,14 +26,21 @@ fn main() {
             ..default()
         }))
         .add_event::<MovementEvent>()
+        .add_event::<AppleEatenEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 trigger_movement,
-                movement.run_if(on_event::<MovementEvent>),
-                remove_tail.run_if(on_event::<MovementEvent>),
                 change_direction,
+                grow.run_if(on_event::<AppleEatenEvent>),
+                (
+                    move_head,
+                    eat_apple,
+                    remove_tail.run_if(not(on_event::<AppleEatenEvent>)),
+                )
+                    .chain()
+                    .run_if(on_event::<MovementEvent>),
             ),
         )
         .run();
@@ -137,7 +147,7 @@ fn trigger_movement(
     }
 }
 
-fn movement(
+fn move_head(
     mut commands: Commands,
     mut query: Query<(&mut LastDirection, &Direction)>,
     mut head_query: Query<(Entity, &mut Transform), With<Head>>,
@@ -243,7 +253,7 @@ fn spawn_apple(
         }
     }
     for position in body_part_positions {
-        spawn_points.retain(|p| p.x != position.x && p.y != position.y);
+        spawn_points.retain(|p| p != &position);
     }
 
     spawn_points.shuffle(&mut rand::rng());
@@ -257,4 +267,40 @@ fn spawn_apple(
                 .extend(0.0),
         ),
     ));
+}
+
+fn eat_apple(
+    head_query: Query<&Transform, With<Head>>,
+    apple_query: Query<(Entity, &Transform), With<Apple>>,
+    mut apple_eaten_event: EventWriter<AppleEatenEvent>,
+) {
+    let head_transform = head_query.single();
+    let (apple, apple_transform) = apple_query.single();
+
+    if head_transform.translation.truncate() == apple_transform.translation.truncate() {
+        apple_eaten_event.send(AppleEatenEvent(apple));
+    }
+}
+
+fn grow(
+    mut commands: Commands,
+    mut apple_eaten_event: EventReader<AppleEatenEvent>,
+    constants: Res<Constants>,
+    body_parts: Query<&Transform, With<BodyPart>>,
+) {
+    for apple in apple_eaten_event.read() {
+        commands.entity(apple.0).despawn();
+    }
+
+    let positions = body_parts
+        .iter()
+        .map(|t| t.translation.truncate())
+        .collect::<Vec<_>>();
+
+    spawn_apple(
+        &mut commands,
+        constants.size,
+        constants.apple_texture_handle.clone(),
+        positions,
+    );
 }
