@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy::sprite::Anchor;
+use bevy::window::PrimaryWindow;
 use rand::prelude::SliceRandom;
 use std::time::Duration;
 
@@ -33,7 +35,7 @@ fn main() {
             (
                 trigger_movement,
                 change_direction,
-                grow.run_if(on_event::<AppleEatenEvent>),
+                (grow, update_score).run_if(on_event::<AppleEatenEvent>),
                 (
                     move_head,
                     eat_apple,
@@ -64,6 +66,9 @@ struct NextBodyPart(Option<Entity>);
 #[derive(Component)]
 struct Apple;
 
+#[derive(Component)]
+struct Score(u32);
+
 #[derive(Component, Default, Clone)]
 enum Direction {
     Up,
@@ -83,6 +88,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
+    window: Query<&Window, With<PrimaryWindow>>,
     asset_server: Res<AssetServer>,
 ) {
     let size = 50.0;
@@ -132,6 +138,23 @@ fn setup(
         constants.apple_texture_handle.clone(),
         vec![head_position, body_position, tail_position],
     );
+
+    let resolution = &window.single().resolution;
+    commands.spawn((
+        Score(0),
+        Text2d::new("Score: 0"),
+        TextFont {
+            font: asset_server.load("fonts/upheavtt.ttf"),
+            font_size: 50.0,
+            ..default()
+        },
+        Anchor::TopLeft,
+        Transform::from_translation(Vec3::new(
+            resolution.width() / -2.0 + 20.0,
+            resolution.height() / 2.0,
+            0.0,
+        )),
+    ));
 
     commands.spawn(Camera2d);
     commands.insert_resource(constants);
@@ -303,4 +326,10 @@ fn grow(
         constants.apple_texture_handle.clone(),
         positions,
     );
+}
+
+fn update_score(mut query: Query<(&mut Text2d, &mut Score)>) {
+    let (mut text, mut score) = query.single_mut();
+    score.0 += 1;
+    text.0 = format!("Score: {}", score.0);
 }
