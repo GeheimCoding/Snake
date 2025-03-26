@@ -1,8 +1,13 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::window::PrimaryWindow;
+use bincode::{Decode, Encode, config};
 use rand::prelude::SliceRandom;
+use std::fs::File;
+use std::io::{ErrorKind, Read, Write};
+use std::path::Path;
 use std::time::Duration;
+use std::{fs, io};
 
 #[derive(Resource)]
 struct Constants {
@@ -68,6 +73,9 @@ struct Apple;
 
 #[derive(Component)]
 struct Score(u32);
+
+#[derive(Component, Encode, Decode)]
+struct HighScore(u32);
 
 #[derive(Component, Default, Clone)]
 enum Direction {
@@ -156,8 +164,53 @@ fn setup(
         )),
     ));
 
+    let high_score = load_high_score().expect("could not read high score");
+    commands.spawn((
+        Text2d::new(format!("High Score: {}", high_score.0)),
+        high_score,
+        TextFont {
+            font: asset_server.load("fonts/upheavtt.ttf"),
+            font_size: 50.0,
+            ..default()
+        },
+        Anchor::TopRight,
+        Transform::from_translation(Vec3::new(
+            resolution.width() / 2.0 - 20.0,
+            resolution.height() / 2.0,
+            0.0,
+        )),
+    ));
+
     commands.spawn(Camera2d);
     commands.insert_resource(constants);
+}
+
+fn load_high_score() -> io::Result<HighScore> {
+    let file = File::open("assets/saves/high_score");
+    if let Err(err) = file {
+        match err.kind() {
+            ErrorKind::NotFound => Ok(HighScore(0)),
+            _ => Err(err),
+        }
+    } else {
+        let mut content = vec![];
+        file?.read_to_end(&mut content)?;
+        Ok(bincode::decode_from_slice(&content, config::standard())
+            .expect("failed to decode high score")
+            .0)
+    }
+}
+
+fn save_high_score(high_score: &HighScore) -> io::Result<()> {
+    let path = Path::new("assets/saves");
+    fs::create_dir_all(path)?;
+    let mut file = File::create(path.join("high_score"))?;
+
+    let encoded = bincode::encode_to_vec(high_score, config::standard())
+        .expect("failed to encode high score");
+    file.write_all(&encoded)?;
+
+    Ok(())
 }
 
 fn trigger_movement(
@@ -328,8 +381,26 @@ fn grow(
     );
 }
 
-fn update_score(mut query: Query<(&mut Text2d, &mut Score)>) {
-    let (mut text, mut score) = query.single_mut();
-    score.0 += 1;
-    text.0 = format!("Score: {}", score.0);
+fn update_score(
+    mut set: ParamSet<(
+        Query<(&mut Text2d, &mut Score)>,
+        Query<(&mut Text2d, &mut HighScore)>,
+    )>,
+) {
+    let current_score;
+    {
+        let mut q_score = set.p0();
+        let (mut text, mut score) = q_score.single_mut();
+        score.0 += 1;
+        current_score = score.0;
+        text.0 = format!("Score: {}", score.0);
+    }
+
+    let mut q_high_score = set.p1();
+    let (mut text, mut high_score) = q_high_score.single_mut();
+    if high_score.0 < current_score {
+        high_score.0 += 1;
+        text.0 = format!("High Score: {}", high_score.0);
+        save_high_score(&high_score).expect("could not save high score");
+    }
 }
