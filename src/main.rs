@@ -14,6 +14,7 @@ struct Constants {
     size: f32,
     mesh_handle: Handle<Mesh>,
     color_handle: Handle<ColorMaterial>,
+    head_texture_handle: Handle<Image>,
     apple_texture_handle: Handle<Image>,
 }
 
@@ -43,6 +44,7 @@ fn main() {
                 (grow, update_score).run_if(on_event::<AppleEatenEvent>),
                 (
                     move_head,
+                    adjust_head_direction,
                     eat_apple,
                     remove_tail.run_if(not(on_event::<AppleEatenEvent>)),
                 )
@@ -53,14 +55,26 @@ fn main() {
         .run();
 }
 
-#[derive(Component)]
+#[derive(Component, PartialEq)]
 struct Head;
 
 #[derive(Component)]
 struct Body;
 
+impl PartialEq<Head> for Body {
+    fn eq(&self, _: &Head) -> bool {
+        false
+    }
+}
+
 #[derive(Component)]
 struct Tail;
+
+impl PartialEq<Head> for Tail {
+    fn eq(&self, _: &Head) -> bool {
+        false
+    }
+}
 
 #[derive(Component)]
 struct BodyPart;
@@ -109,6 +123,7 @@ fn setup(
         size,
         mesh_handle: mesh_handle.clone(),
         color_handle: color_handle.clone(),
+        head_texture_handle: asset_server.load("textures/head.png"),
         apple_texture_handle: asset_server.load("textures/apple.png"),
     };
 
@@ -249,8 +264,33 @@ fn move_head(
     commands
         .entity(head)
         .remove::<Head>()
-        .insert((Body, NextBodyPart(Some(new_head))));
+        .remove::<Sprite>()
+        .insert((
+            Body,
+            NextBodyPart(Some(new_head)),
+            Mesh2d(constants.mesh_handle.clone()),
+            MeshMaterial2d(constants.color_handle.clone()),
+        ));
     last_direction.0 = direction.clone();
+}
+
+fn adjust_head_direction(
+    mut q_head: Query<&mut Transform, With<Head>>,
+    q_direction: Query<&Direction>,
+) {
+    let mut transform = q_head.single_mut();
+    match q_direction.single() {
+        Direction::Up => {
+            transform.rotate_z(f32::to_radians(90.0));
+        }
+        Direction::Down => {
+            transform.rotate_z(f32::to_radians(-90.0));
+        }
+        Direction::Left => {
+            transform.rotate_z(f32::to_radians(180.0));
+        }
+        Direction::Right => {}
+    }
 }
 
 fn change_direction(
@@ -297,23 +337,35 @@ fn remove_tail(mut commands: Commands, query: Query<(Entity, &NextBodyPart), Wit
         .insert(Tail);
 }
 
-fn spawn_part<Part: Component>(
+fn spawn_part<Part: Component + PartialEq<Head>>(
     commands: &mut Commands,
     part: Part,
     position: Vec2,
     constants: &Constants,
     next_part: NextBodyPart,
 ) -> Entity {
-    commands
-        .spawn((
-            part,
-            BodyPart,
-            next_part,
-            Mesh2d(constants.mesh_handle.clone()),
-            MeshMaterial2d(constants.color_handle.clone()),
-            Transform::from_xyz(position.x, position.y, 0.0),
-        ))
-        .id()
+    if part == Head {
+        commands
+            .spawn((
+                part,
+                BodyPart,
+                next_part,
+                Sprite::from_image(constants.head_texture_handle.clone()),
+                Transform::from_xyz(position.x, position.y, 0.0),
+            ))
+            .id()
+    } else {
+        commands
+            .spawn((
+                part,
+                BodyPart,
+                next_part,
+                Mesh2d(constants.mesh_handle.clone()),
+                MeshMaterial2d(constants.color_handle.clone()),
+                Transform::from_xyz(position.x, position.y, 0.0),
+            ))
+            .id()
+    }
 }
 
 fn spawn_apple(
