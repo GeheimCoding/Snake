@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::window::PrimaryWindow;
 use bincode::{Decode, Encode, config};
-use rand::prelude::SliceRandom;
+use rand::prelude::{IndexedRandom, SliceRandom};
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
@@ -16,6 +16,11 @@ struct Constants {
     color_handle: Handle<ColorMaterial>,
     head_texture_handle: Handle<Image>,
     apple_texture_handle: Handle<Image>,
+}
+
+#[derive(Resource)]
+struct AppleCrunch {
+    handles: Vec<Handle<AudioSource>>,
 }
 
 #[derive(Event)]
@@ -41,7 +46,7 @@ fn main() {
             (
                 trigger_movement,
                 change_direction,
-                (grow, update_score).run_if(on_event::<AppleEatenEvent>),
+                (grow, update_score, play_crunch_sound).run_if(on_event::<AppleEatenEvent>),
                 (
                     move_head,
                     adjust_head_direction,
@@ -198,6 +203,12 @@ fn setup(
 
     commands.spawn(Camera2d);
     commands.insert_resource(constants);
+
+    let handles = (1..=4)
+        .map(|i| format!("sounds/apple-crunch-{i}.wav"))
+        .map(|name| asset_server.load(name))
+        .collect();
+    commands.insert_resource(AppleCrunch { handles });
 }
 
 fn load_high_score() -> io::Result<HighScore> {
@@ -408,6 +419,15 @@ fn eat_apple(
     if head_transform.translation.truncate() == apple_transform.translation.truncate() {
         apple_eaten_event.send(AppleEatenEvent(apple));
     }
+}
+
+fn play_crunch_sound(mut commands: Commands, apple_crunch: Res<AppleCrunch>) {
+    let handle = apple_crunch
+        .handles
+        .choose(&mut rand::rng())
+        .expect("handles");
+
+    commands.spawn((AudioPlayer(handle.clone()), PlaybackSettings::DESPAWN));
 }
 
 fn grow(
