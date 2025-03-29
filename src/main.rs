@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+use bevy::utils::HashMap;
 use bevy::window::PrimaryWindow;
 use bincode::{Decode, Encode, config};
 use rand::prelude::{IndexedRandom, SliceRandom};
@@ -9,13 +10,20 @@ use std::path::Path;
 use std::time::Duration;
 use std::{fs, io};
 
+#[derive(PartialEq, Eq, Hash)]
+enum SnakePart {
+    Head,
+    Body,
+    BodyBent,
+    BodyBent2,
+    Tail,
+}
+
 #[derive(Resource)]
 struct Constants {
     size: f32,
-    mesh_handle: Handle<Mesh>,
-    color_handle: Handle<ColorMaterial>,
-    head_texture_handle: Handle<Image>,
     apple_texture_handle: Handle<Image>,
+    snake_texture_handles: HashMap<SnakePart, Handle<Image>>,
 }
 
 #[derive(Resource)]
@@ -48,10 +56,11 @@ fn main() {
                 change_direction,
                 (grow, update_score, play_crunch_sound).run_if(on_event::<AppleEatenEvent>),
                 (
-                    move_head,
+                    move_head.after(change_direction),
                     adjust_head_direction,
                     eat_apple,
                     remove_tail.run_if(not(on_event::<AppleEatenEvent>)),
+                    adjust_tail_direction,
                 )
                     .chain()
                     .run_if(on_event::<MovementEvent>),
@@ -60,32 +69,20 @@ fn main() {
         .run();
 }
 
-#[derive(Component, PartialEq)]
+#[derive(Component)]
 struct Head;
 
 #[derive(Component)]
 struct Body;
 
-impl PartialEq<Head> for Body {
-    fn eq(&self, _: &Head) -> bool {
-        false
-    }
-}
-
 #[derive(Component)]
 struct Tail;
-
-impl PartialEq<Head> for Tail {
-    fn eq(&self, _: &Head) -> bool {
-        false
-    }
-}
 
 #[derive(Component)]
 struct BodyPart;
 
 #[derive(Component)]
-struct NextBodyPart(Option<Entity>);
+struct NextBodyPart(Option<(Entity, Vec2)>);
 
 #[derive(Component)]
 struct Apple;
@@ -96,13 +93,25 @@ struct Score(u32);
 #[derive(Component, Encode, Decode)]
 struct HighScore(u32);
 
-#[derive(Component, Default, Clone)]
+#[derive(Component, Default, Clone, PartialEq)]
 enum Direction {
     Up,
     Down,
     Left,
     #[default]
     Right,
+}
+
+impl Direction {
+    fn is_clockwise(&self, next: &Direction) -> bool {
+        matches!(
+            (self, next),
+            (Direction::Right, Direction::Down)
+                | (Direction::Down, Direction::Left)
+                | (Direction::Left, Direction::Up)
+                | (Direction::Up, Direction::Right)
+        )
+    }
 }
 
 #[derive(Component, Clone)]
@@ -113,22 +122,26 @@ struct MovementTimer(Timer);
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut color_materials: ResMut<Assets<ColorMaterial>>,
     window: Query<&Window, With<PrimaryWindow>>,
     asset_server: Res<AssetServer>,
 ) {
     let size = 50.0;
     let speed = Duration::from_millis(100);
-    let color = Color::srgb(0.3, 0.5, 0.3);
-    let color_handle = color_materials.add(color);
-    let mesh_handle = meshes.add(Rectangle::from_size(Vec2::splat(size)));
-
     let constants = Constants {
         size,
-        mesh_handle: mesh_handle.clone(),
-        color_handle: color_handle.clone(),
-        head_texture_handle: asset_server.load("textures/head.png"),
+        snake_texture_handles: HashMap::from([
+            (SnakePart::Head, asset_server.load("textures/head.png")),
+            (SnakePart::Body, asset_server.load("textures/body.png")),
+            (
+                SnakePart::BodyBent,
+                asset_server.load("textures/body_bent.png"),
+            ),
+            (
+                SnakePart::BodyBent2,
+                asset_server.load("textures/body_bent_2.png"),
+            ),
+            (SnakePart::Tail, asset_server.load("textures/tail.png")),
+        ]),
         apple_texture_handle: asset_server.load("textures/apple.png"),
     };
 
@@ -140,7 +153,7 @@ fn setup(
         &mut commands,
         Head,
         head_position,
-        &constants,
+        constants.snake_texture_handles[&SnakePart::Head].clone(),
         NextBodyPart(None),
     );
     let body_position = Vec2::new(-size, 0.0);
@@ -148,16 +161,16 @@ fn setup(
         &mut commands,
         Body,
         body_position,
-        &constants,
-        NextBodyPart(Some(head)),
+        constants.snake_texture_handles[&SnakePart::Body].clone(),
+        NextBodyPart(Some((head, head_position))),
     );
     let tail_position = Vec2::new(-2.0 * size, 0.0);
     spawn_part(
         &mut commands,
         Tail,
         tail_position,
-        &constants,
-        NextBodyPart(Some(body)),
+        constants.snake_texture_handles[&SnakePart::Tail].clone(),
+        NextBodyPart(Some((body, body_position))),
     );
 
     spawn_apple(
@@ -252,12 +265,12 @@ fn trigger_movement(
 fn move_head(
     mut commands: Commands,
     mut query: Query<(&mut LastDirection, &Direction)>,
-    mut head_query: Query<(Entity, &mut Transform), With<Head>>,
+    head_query: Query<(Entity, &Transform), With<Head>>,
     constants: Res<Constants>,
 ) {
     let size = constants.size;
     let (mut last_direction, direction) = query.single_mut();
-    let (head, transform) = head_query.single_mut();
+    let (head, transform) = head_query.single();
     let offset = Vec2::from(match direction {
         Direction::Up => (0.0, size),
         Direction::Down => (0.0, -size),
@@ -265,23 +278,30 @@ fn move_head(
         Direction::Right => (size, 0.0),
     });
 
+    let new_head_position = transform.translation.truncate() + offset;
     let new_head = spawn_part(
         &mut commands,
         Head,
-        transform.translation.truncate() + offset,
-        &constants,
+        new_head_position,
+        constants.snake_texture_handles[&SnakePart::Head].clone(),
         NextBodyPart(None),
     );
-    commands
-        .entity(head)
-        .remove::<Head>()
-        .remove::<Sprite>()
-        .insert((
-            Body,
-            NextBodyPart(Some(new_head)),
-            Mesh2d(constants.mesh_handle.clone()),
-            MeshMaterial2d(constants.color_handle.clone()),
-        ));
+    let is_clockwise = last_direction.0.is_clockwise(&direction);
+    let part = if last_direction.0 == *direction {
+        SnakePart::Body
+    } else if is_clockwise {
+        SnakePart::BodyBent2
+    } else {
+        SnakePart::BodyBent
+    };
+    let mut sprite = Sprite::from_image(constants.snake_texture_handles[&part].clone());
+    sprite.flip_y = is_clockwise;
+
+    commands.entity(head).remove::<Head>().insert((
+        Body,
+        NextBodyPart(Some((new_head, new_head_position))),
+        sprite,
+    ));
     last_direction.0 = direction.clone();
 }
 
@@ -301,6 +321,28 @@ fn adjust_head_direction(
             transform.rotate_z(f32::to_radians(180.0));
         }
         Direction::Right => {}
+    }
+}
+
+fn adjust_tail_direction(mut q_tail: Query<(&mut Transform, &NextBodyPart), With<Tail>>) {
+    let (mut transform, next_body_part) = q_tail.single_mut();
+    if let Some((_, next_position)) = next_body_part.0 {
+        let position = transform.translation.truncate();
+
+        transform.rotation = Quat::IDENTITY;
+        if next_position.x == position.x {
+            if next_position.y > position.y {
+                transform.rotate_z(f32::to_radians(90.0));
+            } else {
+                transform.rotate_z(f32::to_radians(-90.0));
+            }
+        } else {
+            if next_position.x > position.x {
+                transform.rotate_z(f32::to_radians(0.0));
+            } else {
+                transform.rotate_z(f32::to_radians(180.0));
+            }
+        }
     }
 }
 
@@ -339,44 +381,38 @@ fn change_direction(
     }
 }
 
-fn remove_tail(mut commands: Commands, query: Query<(Entity, &NextBodyPart), With<Tail>>) {
+fn remove_tail(
+    mut commands: Commands,
+    query: Query<(Entity, &NextBodyPart), With<Tail>>,
+    constants: Res<Constants>,
+) {
     let (tail, next_part) = query.single();
     commands.entity(tail).despawn();
     commands
-        .entity(next_part.0.expect("expected tail to have a next_part"))
+        .entity(next_part.0.expect("expected tail to have a next_part").0)
         .remove::<Body>()
-        .insert(Tail);
+        .insert((
+            Tail,
+            Sprite::from_image(constants.snake_texture_handles[&SnakePart::Tail].clone()),
+        ));
 }
 
-fn spawn_part<Part: Component + PartialEq<Head>>(
+fn spawn_part<Part: Component>(
     commands: &mut Commands,
     part: Part,
     position: Vec2,
-    constants: &Constants,
+    image: Handle<Image>,
     next_part: NextBodyPart,
 ) -> Entity {
-    if part == Head {
-        commands
-            .spawn((
-                part,
-                BodyPart,
-                next_part,
-                Sprite::from_image(constants.head_texture_handle.clone()),
-                Transform::from_xyz(position.x, position.y, 0.0),
-            ))
-            .id()
-    } else {
-        commands
-            .spawn((
-                part,
-                BodyPart,
-                next_part,
-                Mesh2d(constants.mesh_handle.clone()),
-                MeshMaterial2d(constants.color_handle.clone()),
-                Transform::from_xyz(position.x, position.y, 0.0),
-            ))
-            .id()
-    }
+    commands
+        .spawn((
+            part,
+            BodyPart,
+            next_part,
+            Sprite::from_image(image),
+            Transform::from_xyz(position.x, position.y, -1.0),
+        ))
+        .id()
 }
 
 fn spawn_apple(
