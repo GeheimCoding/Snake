@@ -256,6 +256,13 @@ fn setup(
                 ..default()
             },
         ));
+
+    let playable_area = Vec2::splat(size * 12.8);
+    commands.spawn((
+        Mesh2d(meshes.add(Rectangle::from_size(playable_area))),
+        MeshMaterial2d(color_materials.add(Color::srgb(0.1, 0.5, 0.3))),
+        Transform::from_xyz(0.0, 0.0, -2.0),
+    ));
 }
 
 fn load_high_score() -> io::Result<HighScore> {
@@ -456,8 +463,8 @@ fn spawn_apple(
     body_part_positions: Vec<Vec2>,
 ) {
     let mut spawn_points = Vec::new();
-    for x in -11..11 {
-        for y in -6..6 {
+    for x in -6..=6 {
+        for y in -6..=6 {
             spawn_points.push(Vec2::new(x as f32 * size, y as f32 * size));
         }
     }
