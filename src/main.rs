@@ -37,6 +37,13 @@ struct MovementEvent;
 #[derive(Event)]
 struct AppleEatenEvent(Entity);
 
+#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
+enum GameState {
+    #[default]
+    Running,
+    Paused,
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -46,9 +53,11 @@ fn main() {
             }),
             ..default()
         }))
+        .init_state::<GameState>()
         .add_event::<MovementEvent>()
         .add_event::<AppleEatenEvent>()
         .add_systems(Startup, setup)
+        .add_systems(Update, toggle_pause_game)
         .add_systems(
             Update,
             (
@@ -64,7 +73,8 @@ fn main() {
                 )
                     .chain()
                     .run_if(on_event::<MovementEvent>),
-            ),
+            )
+                .run_if(in_state(GameState::Running)),
         )
         .run();
 }
@@ -120,10 +130,15 @@ struct LastDirection(Direction);
 #[derive(Component)]
 struct MovementTimer(Timer);
 
+#[derive(Component)]
+struct PausedOverlay;
+
 fn setup(
     mut commands: Commands,
     window: Query<&Window, With<PrimaryWindow>>,
     asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let size = 50.0;
     let speed = Duration::from_millis(100);
@@ -180,12 +195,13 @@ fn setup(
         vec![head_position, body_position, tail_position],
     );
 
+    let font = asset_server.load("fonts/upheavtt.ttf");
     let resolution = &window.single().resolution;
     commands.spawn((
         Score(0),
         Text2d::new("Score: 0"),
         TextFont {
-            font: asset_server.load("fonts/upheavtt.ttf"),
+            font: font.clone(),
             font_size: 50.0,
             ..default()
         },
@@ -202,7 +218,7 @@ fn setup(
         Text2d::new(format!("High Score: {}", high_score.0)),
         high_score,
         TextFont {
-            font: asset_server.load("fonts/upheavtt.ttf"),
+            font: font.clone(),
             font_size: 50.0,
             ..default()
         },
@@ -222,6 +238,24 @@ fn setup(
         .map(|name| asset_server.load(name))
         .collect();
     commands.insert_resource(AppleCrunch { handles });
+
+    commands
+        .spawn((
+            PausedOverlay,
+            Mesh2d(meshes.add(Rectangle::from_size(resolution.size()))),
+            MeshMaterial2d(color_materials.add(Color::srgba(0., 0., 0., 0.8))),
+            Visibility::Hidden,
+        ))
+        .with_child((
+            Text2d::new("Paused"),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+            TextColor(Color::srgb(0.5, 1.0, 1.0)),
+            TextFont {
+                font: font.clone(),
+                font_size: 50.0,
+                ..default()
+            },
+        ));
 }
 
 fn load_high_score() -> io::Result<HighScore> {
@@ -510,5 +544,26 @@ fn update_score(
         high_score.0 += 1;
         text.0 = format!("High Score: {}", high_score.0);
         save_high_score(&high_score).expect("could not save high score");
+    }
+}
+
+fn toggle_pause_game(
+    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<State<GameState>>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut query: Query<&mut Visibility, With<PausedOverlay>>,
+) {
+    if keys.just_pressed(KeyCode::Escape) {
+        let mut visibility = query.single_mut();
+        match state.get() {
+            GameState::Paused => {
+                next_state.set(GameState::Running);
+                *visibility = Visibility::Hidden;
+            }
+            GameState::Running => {
+                next_state.set(GameState::Paused);
+                *visibility = Visibility::Inherited;
+            }
+        }
     }
 }
