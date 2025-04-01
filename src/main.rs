@@ -319,7 +319,10 @@ fn move_head(
         Direction::Right => (size, 0.0),
     });
 
-    let new_head_position = transform.translation.truncate() + offset;
+    let mut new_head_position = transform.translation.truncate() + offset;
+    let new_coordinates = (new_head_position / size + Vec2::splat(6.0) + 13.0) % 13.0;
+    new_head_position = (new_coordinates - Vec2::splat(6.0)) * size;
+
     let new_head = spawn_part(
         &mut commands,
         Head,
