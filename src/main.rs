@@ -257,11 +257,35 @@ fn setup(
             },
         ));
 
-    let playable_area = Vec2::splat(size * 12.8);
+    let playable_area = Vec2::splat(size * 13.0);
     commands.spawn((
         Mesh2d(meshes.add(Rectangle::from_size(playable_area))),
         MeshMaterial2d(color_materials.add(Color::srgb(0.1, 0.5, 0.3))),
         Transform::from_xyz(0.0, 0.0, -2.0),
+    ));
+
+    let wall_color = color_materials.add(Color::srgb(0.3, 0.7, 0.6));
+    let horizontal_wall = meshes.add(Rectangle::new(size / 2.0, playable_area.y));
+    let vertical_wall = meshes.add(Rectangle::new(playable_area.x, size / 2.0));
+    commands.spawn((
+        Mesh2d(horizontal_wall.clone()),
+        MeshMaterial2d(wall_color.clone()),
+        Transform::from_xyz(-6.5 * size, 0.0, 0.0),
+    ));
+    commands.spawn((
+        Mesh2d(horizontal_wall),
+        MeshMaterial2d(wall_color.clone()),
+        Transform::from_xyz(6.5 * size, 0.0, 0.0),
+    ));
+    commands.spawn((
+        Mesh2d(vertical_wall.clone()),
+        MeshMaterial2d(wall_color.clone()),
+        Transform::from_xyz(0.0, -6.5 * size, 0.0),
+    ));
+    commands.spawn((
+        Mesh2d(vertical_wall),
+        MeshMaterial2d(wall_color),
+        Transform::from_xyz(0.0, 6.5 * size, 0.0),
     ));
 }
 
@@ -483,7 +507,7 @@ fn spawn_apple(
             spawn_points
                 .first()
                 .expect("expected spawn point")
-                .extend(0.0),
+                .extend(-1.0),
         ),
     ));
 }
