@@ -46,13 +46,17 @@ enum GameState {
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: String::from("Snake"),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: String::from("Snake"),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(ImagePlugin::default_nearest()),
+        )
         .init_state::<GameState>()
         .add_event::<MovementEvent>()
         .add_event::<AppleEatenEvent>()
@@ -211,7 +215,7 @@ fn setup(
         Text2d::new("Score: 0"),
         TextFont {
             font: font.clone(),
-            font_size: 50.0,
+            font_size: 40.0,
             ..default()
         },
         Anchor::TopLeft,
@@ -224,17 +228,17 @@ fn setup(
 
     let high_score = load_high_score().expect("could not read high score");
     commands.spawn((
-        Text2d::new(format!("High Score: {}", high_score.0)),
+        Text2d::new(format!("Highest: {}", high_score.0)),
         high_score,
         TextFont {
             font: font.clone(),
-            font_size: 50.0,
+            font_size: 40.0,
             ..default()
         },
-        Anchor::TopRight,
+        Anchor::TopLeft,
         Transform::from_translation(Vec3::new(
-            resolution.width() / 2.0 - 20.0,
-            resolution.height() / 2.0,
+            resolution.width() / -2.0 + 20.0,
+            resolution.height() / 2.0 - 40.0,
             0.0,
         )),
     ));
@@ -566,7 +570,7 @@ fn update_score(
     let (mut text, mut high_score) = q_high_score.single_mut();
     if high_score.0 < current_score {
         high_score.0 += 1;
-        text.0 = format!("High Score: {}", high_score.0);
+        text.0 = format!("Highest: {}", high_score.0);
         save_high_score(&high_score).expect("could not save high score");
     }
 }
