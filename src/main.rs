@@ -92,7 +92,7 @@ struct Tail;
 struct BodyPart;
 
 #[derive(Component)]
-struct NextBodyPart(Option<(Entity, Vec2)>);
+struct NextBodyPart(Option<Entity>);
 
 #[derive(Component)]
 struct Apple;
@@ -103,7 +103,7 @@ struct Score(u32);
 #[derive(Component, Encode, Decode)]
 struct HighScore(u32);
 
-#[derive(Component, Default, Clone, PartialEq)]
+#[derive(Component, Debug, Default, Clone, PartialEq)]
 enum Direction {
     Up,
     Down,
@@ -121,6 +121,15 @@ impl Direction {
                 | (Direction::Left, Direction::Up)
                 | (Direction::Up, Direction::Right)
         )
+    }
+
+    fn to_radians(&self) -> f32 {
+        f32::to_radians(match self {
+            Direction::Up => 90.0,
+            Direction::Down => -90.0,
+            Direction::Left => 180.0,
+            Direction::Right => 0.0,
+        })
     }
 }
 
@@ -177,7 +186,7 @@ fn setup(
         Body,
         body_position,
         constants.snake_texture_handles[&SnakePart::Body].clone(),
-        NextBodyPart(Some((head, head_position))),
+        NextBodyPart(Some(head)),
     );
     let tail_position = Vec2::new(-2.0 * size, 0.0);
     spawn_part(
@@ -185,7 +194,7 @@ fn setup(
         Tail,
         tail_position,
         constants.snake_texture_handles[&SnakePart::Tail].clone(),
-        NextBodyPart(Some((body, body_position))),
+        NextBodyPart(Some(body)),
     );
 
     spawn_apple(
@@ -367,7 +376,8 @@ fn move_head(
 
     commands.entity(head).remove::<Head>().insert((
         Body,
-        NextBodyPart(Some((new_head, new_head_position))),
+        last_direction.0.clone(),
+        NextBodyPart(Some(new_head)),
         sprite,
     ));
     last_direction.0 = direction.clone();
@@ -375,41 +385,21 @@ fn move_head(
 
 fn adjust_head_direction(
     mut q_head: Query<&mut Transform, With<Head>>,
-    q_direction: Query<&Direction>,
+    q_direction: Query<&Direction, With<LastDirection>>,
 ) {
     let mut transform = q_head.single_mut();
-    match q_direction.single() {
-        Direction::Up => {
-            transform.rotate_z(f32::to_radians(90.0));
-        }
-        Direction::Down => {
-            transform.rotate_z(f32::to_radians(-90.0));
-        }
-        Direction::Left => {
-            transform.rotate_z(f32::to_radians(180.0));
-        }
-        Direction::Right => {}
-    }
+    transform.rotate_z(q_direction.single().to_radians());
 }
 
-fn adjust_tail_direction(mut q_tail: Query<(&mut Transform, &NextBodyPart), With<Tail>>) {
+fn adjust_tail_direction(
+    mut q_tail: Query<(&mut Transform, &NextBodyPart), With<Tail>>,
+    q_direction: Query<&Direction>,
+) {
     let (mut transform, next_body_part) = q_tail.single_mut();
-    if let Some((_, next_position)) = next_body_part.0 {
-        let position = transform.translation.truncate();
-
-        transform.rotation = Quat::IDENTITY;
-        if next_position.x == position.x {
-            if next_position.y > position.y {
-                transform.rotate_z(f32::to_radians(90.0));
-            } else {
-                transform.rotate_z(f32::to_radians(-90.0));
-            }
-        } else {
-            if next_position.x > position.x {
-                transform.rotate_z(f32::to_radians(0.0));
-            } else {
-                transform.rotate_z(f32::to_radians(180.0));
-            }
+    if let Some(entity) = next_body_part.0 {
+        if let Ok(direction) = q_direction.get(entity) {
+            transform.rotation = Quat::IDENTITY;
+            transform.rotate_z(direction.to_radians());
         }
     }
 }
@@ -457,7 +447,7 @@ fn remove_tail(
     let (tail, next_part) = query.single();
     commands.entity(tail).despawn();
     commands
-        .entity(next_part.0.expect("expected tail to have a next_part").0)
+        .entity(next_part.0.expect("expected tail to have a next_part"))
         .remove::<Body>()
         .insert((
             Tail,
