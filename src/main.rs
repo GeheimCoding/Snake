@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use bevy::utils::HashMap;
+use bevy::utils::{HashMap, HashSet};
 use bevy::window::PrimaryWindow;
 use bincode::{Decode, Encode, config};
 use rand::prelude::{IndexedRandom, SliceRandom};
@@ -37,6 +37,9 @@ struct MovementEvent;
 #[derive(Event)]
 struct AppleEatenEvent(Entity);
 
+#[derive(Event)]
+struct GameOverEvent;
+
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 enum GameState {
     #[default]
@@ -60,6 +63,7 @@ fn main() {
         .init_state::<GameState>()
         .add_event::<MovementEvent>()
         .add_event::<AppleEatenEvent>()
+        .add_event::<GameOverEvent>()
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_pause_game)
         .add_systems(
@@ -74,14 +78,21 @@ fn main() {
                     eat_apple,
                     remove_tail.run_if(not(on_event::<AppleEatenEvent>)),
                     adjust_tail_direction,
+                    check_game_over,
                 )
                     .chain()
                     .run_if(on_event::<MovementEvent>),
+                (despawn_all, setup)
+                    .chain()
+                    .run_if(on_event::<GameOverEvent>),
             )
                 .run_if(in_state(GameState::Running)),
         )
         .run();
 }
+
+#[derive(Component)]
+struct Custom;
 
 #[derive(Component)]
 struct Head;
@@ -173,8 +184,15 @@ fn setup(
         apple_texture_handle: asset_server.load("textures/apple.png"),
     };
 
-    commands.spawn(MovementTimer(Timer::new(speed, TimerMode::Repeating)));
-    commands.spawn((Direction::default(), LastDirection(Direction::default())));
+    commands.spawn((
+        Custom,
+        MovementTimer(Timer::new(speed, TimerMode::Repeating)),
+    ));
+    commands.spawn((
+        Custom,
+        Direction::default(),
+        LastDirection(Direction::default()),
+    ));
 
     let head_position = Vec2::default();
     let head = spawn_part(
@@ -211,6 +229,7 @@ fn setup(
     let font = asset_server.load("fonts/upheavtt.ttf");
     let resolution = &window.single().resolution;
     commands.spawn((
+        Custom,
         Score(0),
         Text2d::new("Score: 0"),
         TextFont {
@@ -228,6 +247,7 @@ fn setup(
 
     let high_score = load_high_score().expect("could not read high score");
     commands.spawn((
+        Custom,
         Text2d::new(format!("Highest: {}", high_score.0)),
         high_score,
         TextFont {
@@ -243,7 +263,7 @@ fn setup(
         )),
     ));
 
-    commands.spawn(Camera2d);
+    commands.spawn((Custom, Camera2d));
     commands.insert_resource(constants);
 
     let handles = (1..=4)
@@ -254,6 +274,7 @@ fn setup(
 
     commands
         .spawn((
+            Custom,
             PausedOverlay,
             Mesh2d(meshes.add(Rectangle::from_size(resolution.size()))),
             MeshMaterial2d(color_materials.add(Color::srgba(0., 0., 0., 0.8))),
@@ -272,6 +293,7 @@ fn setup(
 
     let playable_area = Vec2::splat(size * 13.0);
     commands.spawn((
+        Custom,
         Mesh2d(meshes.add(Rectangle::from_size(playable_area))),
         MeshMaterial2d(color_materials.add(Color::srgb(0.1, 0.5, 0.3))),
         Transform::from_xyz(0.0, 0.0, -2.0),
@@ -281,21 +303,25 @@ fn setup(
     let horizontal_wall = meshes.add(Rectangle::new(size / 2.0, playable_area.y));
     let vertical_wall = meshes.add(Rectangle::new(playable_area.x, size / 2.0));
     commands.spawn((
+        Custom,
         Mesh2d(horizontal_wall.clone()),
         MeshMaterial2d(wall_color.clone()),
         Transform::from_xyz(-6.5 * size, 0.0, 0.0),
     ));
     commands.spawn((
+        Custom,
         Mesh2d(horizontal_wall),
         MeshMaterial2d(wall_color.clone()),
         Transform::from_xyz(6.5 * size, 0.0, 0.0),
     ));
     commands.spawn((
+        Custom,
         Mesh2d(vertical_wall.clone()),
         MeshMaterial2d(wall_color.clone()),
         Transform::from_xyz(0.0, -6.5 * size, 0.0),
     ));
     commands.spawn((
+        Custom,
         Mesh2d(vertical_wall),
         MeshMaterial2d(wall_color),
         Transform::from_xyz(0.0, 6.5 * size, 0.0),
@@ -468,6 +494,7 @@ fn spawn_part<Part: Component>(
 ) -> Entity {
     commands
         .spawn((
+            Custom,
             part,
             BodyPart,
             next_part,
@@ -495,6 +522,7 @@ fn spawn_apple(
 
     spawn_points.shuffle(&mut rand::rng());
     commands.spawn((
+        Custom,
         Apple,
         Sprite::from_image(apple_texture),
         Transform::from_translation(
@@ -525,7 +553,11 @@ fn play_crunch_sound(mut commands: Commands, apple_crunch: Res<AppleCrunch>) {
         .choose(&mut rand::rng())
         .expect("handles");
 
-    commands.spawn((AudioPlayer(handle.clone()), PlaybackSettings::DESPAWN));
+    commands.spawn((
+        Custom,
+        AudioPlayer(handle.clone()),
+        PlaybackSettings::DESPAWN,
+    ));
 }
 
 fn grow(
@@ -593,5 +625,32 @@ fn toggle_pause_game(
                 *visibility = Visibility::Inherited;
             }
         }
+    }
+}
+
+fn check_game_over(
+    constants: Res<Constants>,
+    mut game_over_event: EventWriter<GameOverEvent>,
+    query: Query<&Transform, With<BodyPart>>,
+) {
+    let positions = query
+        .iter()
+        .map(|t| {
+            (
+                (t.translation.x / constants.size) as isize,
+                (t.translation.y / constants.size) as isize,
+            )
+        })
+        .collect::<Vec<_>>();
+    let len = positions.len();
+    let unique_positions = HashSet::from_iter(positions);
+    if len != unique_positions.len() {
+        game_over_event.send(GameOverEvent {});
+    }
+}
+
+fn despawn_all(mut commands: Commands, query: Query<Entity, With<Custom>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn_recursive();
     }
 }
