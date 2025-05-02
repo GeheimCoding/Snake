@@ -31,6 +31,7 @@ opt-level = "s"
 strip = "debuginfo"
 
 [dependencies]
+asset_manager = { path = "asset_manager" }
 bevy = { version = "0.15.3", features = ["wav"] }
 bincode = "2.0.1"
 log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }

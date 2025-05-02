@@ -1,3 +1,7 @@
+use asset_manager::assets::Fonts;
+use asset_manager::assets::Sounds;
+use asset_manager::assets::Textures;
+use asset_manager::{AssetManager, AssetManagerPlugin};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::utils::{HashMap, HashSet};
@@ -7,6 +11,7 @@ use rand::prelude::{IndexedRandom, SliceRandom};
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{fs, io};
 
@@ -49,7 +54,8 @@ enum GameState {
 
 fn main() {
     App::new()
-        .add_plugins(
+        .add_plugins((
+            AssetManagerPlugin,
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -59,7 +65,7 @@ fn main() {
                     ..default()
                 })
                 .set(ImagePlugin::default_nearest()),
-        )
+        ))
         .init_state::<GameState>()
         .add_event::<MovementEvent>()
         .add_event::<AppleEatenEvent>()
@@ -160,7 +166,7 @@ struct PausedOverlay;
 fn setup(
     mut commands: Commands,
     window: Query<&Window, With<PrimaryWindow>>,
-    asset_server: Res<AssetServer>,
+    asset_manager: Res<AssetManager>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
 ) {
@@ -169,19 +175,13 @@ fn setup(
     let constants = Constants {
         size,
         snake_texture_handles: HashMap::from([
-            (SnakePart::Head, asset_server.load("textures/head.png")),
-            (SnakePart::Body, asset_server.load("textures/body.png")),
-            (
-                SnakePart::BodyBent,
-                asset_server.load("textures/body_bent.png"),
-            ),
-            (
-                SnakePart::BodyBent2,
-                asset_server.load("textures/body_bent_2.png"),
-            ),
-            (SnakePart::Tail, asset_server.load("textures/tail.png")),
+            (SnakePart::Head, asset_manager.get(Textures::Head)),
+            (SnakePart::Body, asset_manager.get(Textures::Body)),
+            (SnakePart::BodyBent, asset_manager.get(Textures::BodyBent)),
+            (SnakePart::BodyBent2, asset_manager.get(Textures::BodyBent2)),
+            (SnakePart::Tail, asset_manager.get(Textures::Tail)),
         ]),
-        apple_texture_handle: asset_server.load("textures/apple.png"),
+        apple_texture_handle: asset_manager.get(Textures::Apple),
     };
 
     commands.spawn((
@@ -226,7 +226,7 @@ fn setup(
         vec![head_position, body_position, tail_position],
     );
 
-    let font = asset_server.load("fonts/upheavtt.ttf");
+    let font = asset_manager.get(Fonts::Upheaval);
     let resolution = &window.single().resolution;
     commands.spawn((
         Custom,
@@ -267,8 +267,8 @@ fn setup(
     commands.insert_resource(constants);
 
     let handles = (1..=4)
-        .map(|i| format!("sounds/apple-crunch-{i}.wav"))
-        .map(|name| asset_server.load(name))
+        .map(|i| format!("apple-crunch-{i}"))
+        .map(|name| asset_manager.get(Sounds::from_str(&name).expect("sound")))
         .collect();
     commands.insert_resource(AppleCrunch { handles });
 
